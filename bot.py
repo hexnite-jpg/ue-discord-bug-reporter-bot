@@ -622,11 +622,14 @@ async def process_webhook_bug_report(message):
         for attachment in message.attachments:
             try:
                 await thread.send(
-                    f"📎 **Attachment:** {attachment.filename}",
+                    f"**Attachment:** {attachment.filename}",
                     file=await attachment.to_file()
                 )
             except Exception as e:
                 print(f'Error copying attachment to thread: {e}', flush=True)
+    
+    # Wait a moment for any late-arriving log files
+    await asyncio.sleep(0.5)
     
     # Check for pending log files that arrived before the thread was ready
     # Look for pending files from this webhook
@@ -634,15 +637,29 @@ async def process_webhook_bug_report(message):
     if webhook_key in pending_log_files:
         # Get snapshot of pending files to process (in case new ones arrive during processing)
         files_to_process = pending_log_files[webhook_key][:]
-        print(f'Processing {len(files_to_process)} pending log files', flush=True)
+        
+        # Only process log files that arrived within 3 seconds of this message
+        # This prevents race conditions when multiple players submit reports simultaneously
+        message_time = message.created_at
+        matched_files = []
         
         for log_message, log_timestamp in files_to_process:
+            time_diff = abs((message_time - log_message.created_at).total_seconds())
+            if time_diff <= 3.0:
+                matched_files.append((log_message, log_timestamp))
+            else:
+                print(f'Skipping log file (time diff {time_diff:.1f}s too large)', flush=True)
+        
+        if matched_files:
+            print(f'Processing {len(matched_files)} pending log files (out of {len(files_to_process)} total)', flush=True)
+        
+        for log_message, log_timestamp in matched_files:
             try:
                 # Move attachments to thread
                 for attachment in log_message.attachments:
                     print(f'Sending log file {attachment.filename} to thread {thread.id}', flush=True)
                     await thread.send(
-                        f"📎 **Log File:** {attachment.filename}",
+                        f"**Log File:** {attachment.filename}",
                         file=await attachment.to_file()
                     )
                 print(f'Moved pending log file to thread {thread.id}', flush=True)
