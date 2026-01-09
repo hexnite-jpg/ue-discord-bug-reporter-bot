@@ -10,18 +10,22 @@
 ```bash
 sudo apt-get update && sudo apt-get upgrade -y
 ```
+2. **Install git**
+```bash
+sudo apt install git -y
+```
 
-2. **Create a new user**
+3. **Create a new user**
 ```bash
 adduser botuser
 ```
 
-3. **Give them sudo**
+4. **Give them sudo**
 ```bash
 sudo usermod -aG sudo botuser
 ```
 
-4. **Download/Clone the bot:**
+5. **Download/Clone the bot:**
 ```bash
 git clone https://github.com/hexnite-jpg/ue-discord-bug-reporter-bot.git discord-bug-tracker
 ```
@@ -29,7 +33,7 @@ git clone https://github.com/hexnite-jpg/ue-discord-bug-reporter-bot.git discord
 cd discord-bug-tracker
 ```
 
-5. **Run the installer:**
+6. **Run the installer:**
 ```bash
 chmod +x install.sh
 ./install.sh
