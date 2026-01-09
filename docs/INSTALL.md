@@ -3,19 +3,33 @@
 ## Prerequisites
 - Linux system (Ubuntu/Debian recommended)
 - Discord account with permissions to create bots
+- A new application created on the discord developer portal https://discord.com/developers
 
 ## Quick Install
 1. **Update and Upgrade**
+```bash
+sudo apt-get update && sudo apt-get upgrade -y
+```
 
 2. **Create a new user**
+```bash
+adduser botuser
+```
 
-3. **Download/Clone the bot:**
+3. **Give them sudo**
+```bash
+sudo usermod -aG sudo botuser
+```
+
+4. **Download/Clone the bot:**
 ```bash
 git clone https://github.com/hexnite-jpg/ue-discord-bug-reporter-bot.git discord-bug-tracker
+```
+```
 cd discord-bug-tracker
 ```
 
-4. **Run the installer:**
+5. **Run the installer:**
 ```bash
 chmod +x install.sh
 ./install.sh
