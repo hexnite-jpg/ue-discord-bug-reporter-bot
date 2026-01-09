@@ -76,6 +76,7 @@ echo "Dependencies installed"
 echo ""
 
 # Create .env file if it doesn't exist
+TOKEN_PROVIDED=false
 if [ ! -f .env ]; then
     echo "Creating .env file..."
     cp .env.example .env
@@ -96,17 +97,24 @@ if [ ! -f .env ]; then
     echo "   - MESSAGE CONTENT INTENT"
     echo "   - SERVER MEMBERS INTENT"
     echo ""
-    echo "Enter your Discord Bot Token:"
+    echo "Enter your Discord Bot Token (or press Enter to skip):"
     read -r DISCORD_TOKEN
     
     if [ -z "$DISCORD_TOKEN" ]; then
-        echo "No token provided. You'll need to edit .env manually."
+        echo "⚠️  No token provided. You'll need to edit .env manually before starting the bot."
     else
         sed -i "s/your_bot_token_here/$DISCORD_TOKEN/" .env
-        echo "Token saved to .env"
+        echo "✓ Token saved to .env"
+        TOKEN_PROVIDED=true
     fi
 else
-    echo ".env file already exists"
+    echo "✓ .env file already exists"
+    # Check if token is configured
+    if grep -q "your_bot_token_here" .env; then
+        echo "⚠️  Warning: No bot token configured in .env"
+    else
+        TOKEN_PROVIDED=true
+    fi
 fi
 
 echo ""
@@ -146,17 +154,66 @@ EOF
     sudo systemctl daemon-reload
     sudo systemctl enable discordbot.service
     
-    echo "Service enabled to start on boot"
+    echo "✓ Service enabled to start on boot"
+    
+    # Start service if token was provided
+    if [ "$TOKEN_PROVIDED" = true ]; then
+        echo ""
+        echo "Starting the bot service..."
+        sudo systemctl start discordbot.service
+        sleep 2
+        
+        # Check if service started successfully
+        if systemctl is-active --quiet discordbot.service; then
+            echo "✓ Bot service started successfully!"
+            echo ""
+            echo "Check status: sudo systemctl status discordbot.service"
+            echo "View logs:    sudo journalctl -u discordbot.service -f"
+        else
+            echo "⚠️  Service failed to start. Check logs with:"
+            echo "   sudo journalctl -u discordbot.service -n 50"
+
+if [ "$TOKEN_PROVIDED" = false ]; then
+    echo "⚠️  IMPORTANT: Add your Discord bot token to .env before starting!"
+    echo "   Edit: $INSTALL_DIR/.env"
     echo ""
-    echo "Service management commands:"
-    echo "  Start:   sudo systemctl start discordbot.service"
-    echo "  Stop:    sudo systemctl stop discordbot.service"
-    echo "  Restart: sudo systemctl restart discordbot.service"
-    echo "  Status:  sudo systemctl status discordbot.service"
-    echo "  Logs:    sudo journalctl -u discordbot.service -f"
+fi
+
+echo "Next steps:"
+echo ""
+echo "1. Invite the bot to your Discord server:"
+echo "   Go to Discord Developer Portal → Your App → OAuth2 → URL Generator"
+echo "   Select scopes: 'bot' and 'applications.commands'"
+echo "   Select permissions: 397284598848 (or use the invite generator)"
+echo "   Copy the generated URL and open it in your browser"
+echo ""
+
+if [ "$TOKEN_PROVIDED" = false ]; then
+    echo "2. Add your bot token to .env, then start the bot:"
+    if [[ "$response" =~ ^([yY][eE][sS]|[yY])$ ]]; then
+        echo "   sudo systemctl start discordbot.service"
+    else
+        echo "   .venv/bin/python bot.py"
+    fi
+    echo ""
+    echo "3. In your Discord server, run:"
 else
-    echo "Skipping systemd service installation."
-    echo "You can run the bot manually with: .venv/bin/python bot.py"
+    echo "2. In your Discord server, run:"
+fi
+
+echo "   /bug_setup #your-bug-channel"
+echo ""
+
+if [ "$TOKEN_PROVIDED" = false ]; then
+    echo "4. Start reporting bugs! The bot will create threads automatically."
+else
+    echo "3. Start reporting bugs! The bot will create threads automatically."
+fi
+
+        echo "You can run the bot manually with: .venv/bin/python bot.py"
+    else
+        echo "Add your token to .env first, then run: .venv/bin/python bot.py"
+    fi
 fi
 
 echo ""
