@@ -172,6 +172,36 @@ EOF
         else
             echo "⚠️  Service failed to start. Check logs with:"
             echo "   sudo journalctl -u discordbot.service -n 50"
+        fi
+    else
+        echo ""
+        echo "⚠️  Service not started (no token configured)"
+        echo "   Add your token to .env then run:"
+        echo "   sudo systemctl start discordbot.service"
+    fi
+    
+    echo ""
+    echo "Service management commands:"
+    echo "  Start:   sudo systemctl start discordbot.service"
+    echo "  Stop:    sudo systemctl stop discordbot.service"
+    echo "  Restart: sudo systemctl restart discordbot.service"
+    echo "  Status:  sudo systemctl status discordbot.service"
+    echo "  Logs:    sudo journalctl -u discordbot.service -f"
+else
+    echo "Skipping systemd service installation."
+    
+    if [ "$TOKEN_PROVIDED" = true ]; then
+        echo "You can run the bot manually with: .venv/bin/python bot.py"
+    else
+        echo "Add your token to .env first, then run: .venv/bin/python bot.py"
+    fi
+fi
+
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "Installation Complete!"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
 
 if [ "$TOKEN_PROVIDED" = false ]; then
     echo "⚠️  IMPORTANT: Add your Discord bot token to .env before starting!"
@@ -210,36 +240,6 @@ else
     echo "3. Start reporting bugs! The bot will create threads automatically."
 fi
 
-        echo "You can run the bot manually with: .venv/bin/python bot.py"
-    else
-        echo "Add your token to .env first, then run: .venv/bin/python bot.py"
-    fi
-fi
-
-echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "Installation Complete!"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo ""
-echo "Next steps:"
-echo ""
-echo "1. Invite the bot to your Discord server:"
-echo "   Go to Discord Developer Portal → Your App → OAuth2 → URL Generator"
-echo "   Select scopes: 'bot' and 'applications.commands'"
-echo "   Select permissions: 397284598848 (or use the invite generator)"
-echo "   Copy the generated URL and open it in your browser"
-echo ""
-echo "2. Start the bot:"
-if [[ "$response" =~ ^([yY][eE][sS]|[yY])$ ]]; then
-    echo "   sudo systemctl start discordbot.service"
-else
-    echo "   .venv/bin/python bot.py"
-fi
-echo ""
-echo "3. In your Discord server, run:"
-echo "   /bug_setup #your-bug-channel"
-echo ""
-echo "4. Start reporting bugs! The bot will create threads automatically."
 echo ""
 echo "For more information, see README.md"
 echo ""
