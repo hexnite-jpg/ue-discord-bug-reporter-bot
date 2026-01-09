@@ -3,6 +3,7 @@
 A stateless Discord bot for managing bug reports using reactions and threads. No database required!
 
 **Works seamlessly with Hexnite's Unreal Engine Discord Bug Reporter Plugin for in-game bug reporting.
+https://www.fab.com/listings/1b771480-3608-4bf7-b6f7-4ab74211d5a2
 
 ## Features
 
