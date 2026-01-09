@@ -9,7 +9,7 @@
 
 1. **Download/Clone the bot:**
 ```bash
-git clone <your-repo-url> discord-bug-tracker
+git clone https://github.com/hexnite-jpg/ue-discord-bug-reporter-bot.git discord-bug-tracker
 cd discord-bug-tracker
 ```
 
