@@ -5,9 +5,9 @@
 - Discord account with permissions to create bots
 
 ## Quick Install
-1. **Update and Upgrade
+1. **Update and Upgrade**
 
-2. **Create a new user
+2. **Create a new user**
 
 3. **Download/Clone the bot:**
 ```bash
