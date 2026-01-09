@@ -2,18 +2,20 @@
 
 ## Prerequisites
 - Linux system (Ubuntu/Debian recommended)
-- Python 3.8 or higher
 - Discord account with permissions to create bots
 
 ## Quick Install
+1. **Update and Upgrade
 
-1. **Download/Clone the bot:**
+2. **Create a new user
+
+3. **Download/Clone the bot:**
 ```bash
 git clone https://github.com/hexnite-jpg/ue-discord-bug-reporter-bot.git discord-bug-tracker
 cd discord-bug-tracker
 ```
 
-2. **Run the installer:**
+4. **Run the installer:**
 ```bash
 chmod +x install.sh
 ./install.sh
