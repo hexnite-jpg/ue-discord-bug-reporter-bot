@@ -28,9 +28,6 @@ See [INSTALL.md](docs/INSTALL.md) for detailed installation instructions.
 
 - **[Installation Guide](docs/INSTALL.md)** - Complete setup instructions
 - **[Plugin Integration](docs/PLUGIN_INTEGRATION.md)** - Connect your Unreal Engine project
-- **[Server Admin Guide](docs/SERVER_ADMIN_GUIDE.md)** - Managing bugs and users
-- **[Quick Reference](docs/QUICKREF.md)** - Commands and reactions cheat sheet
-- **[Invite Guide](docs/INVITE.md)** - Bot permissions and invite setup
 
 ## How It Works
 
