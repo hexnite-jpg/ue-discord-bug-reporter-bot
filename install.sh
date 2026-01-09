@@ -103,14 +103,14 @@ if [ ! -f .env ]; then
     if [ -z "$DISCORD_TOKEN" ]; then
         echo "⚠️  No token provided. You'll need to edit .env manually before starting the bot."
     else
-        sed -i "s/your_bot_token_here/$DISCORD_TOKEN/" .env
+        sed -i "s/your_discord_bot_token_here/$DISCORD_TOKEN/" .env
         echo "✓ Token saved to .env"
         TOKEN_PROVIDED=true
     fi
 else
     echo "✓ .env file already exists"
     # Check if token is configured
-    if grep -q "your_bot_token_here" .env; then
+    if grep -q "your_discord_bot_token_here" .env; then
         echo "⚠️  Warning: No bot token configured in .env"
     else
         TOKEN_PROVIDED=true
