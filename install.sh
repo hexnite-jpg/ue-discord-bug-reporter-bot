@@ -33,7 +33,18 @@ if ! command -v pip3 &> /dev/null; then
     sudo apt-get install -y python3-pip
 fi
 
-echo "pip3 is available"
+echo "✓ pip3 is available"
+
+# Check for python3-venv (required on Ubuntu/Debian)
+if ! dpkg -l | grep -q python3.*-venv; then
+    echo ""
+    echo "python3-venv is not installed. Installing..."
+    PYTHON_VERSION_FULL=$(python3 --version 2>&1 | cut -d' ' -f2 | cut -d'.' -f1,2)
+    sudo apt-get update
+    sudo apt-get install -y python${PYTHON_VERSION_FULL}-venv || sudo apt-get install -y python3-venv
+    echo "✓ python3-venv installed"
+fi
+
 echo ""
 
 # Get installation directory
@@ -45,9 +56,9 @@ echo ""
 if [ ! -d ".venv" ]; then
     echo "Creating Python virtual environment..."
     python3 -m venv .venv
-    echo "Virtual environment created"
+    echo "✓ Virtual environment created"
 else
-    echo "Virtual environment already exists"
+    echo "✓ Virtual environment already exists"
 fi
 
 # Activate virtual environment and install dependencies
