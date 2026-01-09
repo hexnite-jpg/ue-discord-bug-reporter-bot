@@ -1,4 +1,5 @@
 # Quick Installation Guide
+This was tested with a fresh LXC running Ubuntu Server 24.04
 
 ## Prerequisites
 - Linux system (Ubuntu/Debian recommended)
@@ -20,12 +21,25 @@ sudo apt install git -y
 adduser botuser
 ```
 
-4. **Give them sudo**
+4. **Give them sudo then log in, back out and back in for changes to take effect**
 ```bash
 sudo usermod -aG sudo botuser
 ```
+```bash
+su botuser
+```
+```bash
+exit
+```
+```bash
+su botuser
+```
 
 5. **Download/Clone the bot:**
+```bash
+cd ~
+```
+
 ```bash
 git clone https://github.com/hexnite-jpg/ue-discord-bug-reporter-bot.git discord-bug-tracker
 ```
@@ -35,7 +49,6 @@ cd discord-bug-tracker
 
 6. **Run the installer:**
 ```bash
-chmod +x install.sh
 ./install.sh
 ```
 
