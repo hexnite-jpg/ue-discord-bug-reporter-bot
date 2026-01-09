@@ -142,6 +142,13 @@ def unblock_user(guild_id, user_id):
         if not blocked_users[guild_id]:
             del blocked_users[guild_id]
         save_blocked_users()
+        
+        # Also clear any recently blocked webhooks cache
+        # (webhooks don't have player IDs, so we clear all for this guild)
+        keys_to_remove = [k for k in recently_blocked_webhooks.keys() if k[0] == guild_id]
+        for key in keys_to_remove:
+            del recently_blocked_webhooks[key]
+        print(f'Cleared {len(keys_to_remove)} webhook caches for guild {guild_id}', flush=True)
 
 def parse_plugin_embed(embed):
     """Parse embed from Unreal Engine plugin webhook"""
@@ -178,7 +185,8 @@ def extract_player_id(embed):
     """Extract Player ID from webhook embed"""
     for field in embed.fields:
         if 'Player ID' in field.name or 'User ID' in field.name:
-            return field.value.strip()
+            # Strip backticks and whitespace from the value
+            return field.value.strip().strip('`')
     return None
 
 def get_current_status_from_reactions(message):
@@ -545,6 +553,16 @@ async def on_message_edit(before, after):
 async def process_webhook_bug_report(message):
     """Process a webhook bug report with embeds"""
     embed = message.embeds[0]
+    
+    # Double-check player isn't blocked (safety check)
+    player_id = extract_player_id(embed)
+    if player_id and is_user_blocked(message.guild.id, player_id):
+        print(f'Blocked player {player_id} caught in process_webhook_bug_report, aborting', flush=True)
+        try:
+            await message.delete()
+        except:
+            pass
+        return
     
     # Parse the plugin embed
     plugin_data = parse_plugin_embed(embed)
