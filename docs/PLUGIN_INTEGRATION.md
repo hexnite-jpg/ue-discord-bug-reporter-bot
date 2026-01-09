@@ -4,7 +4,7 @@ This bot is designed to work seamlessly with the Discord Bug Reporter plugin for
 
 ## How It Works
 
-### 1. Webhook Reports
+### 1. Bug Reports
 
 When a player submits a bug report via the Discord Bug Reporter plugin:
 
@@ -12,7 +12,7 @@ When a player submits a bug report via the Discord Bug Reporter plugin:
 - Discord embed with fields:
   - Response Type (e.g., "Error / Bug Report")
   - Map name
-  - User ID (Player GUID)
+  - Optional: User ID (Player GUID)
   - Location (BugItGo coordinates)
   - Screenshot (attached to embed)
 - Optional: Log file as a second message
@@ -20,15 +20,14 @@ When a player submits a bug report via the Discord Bug Reporter plugin:
 **The bot processes it:**
 - Detects the webhook embed automatically
 - Parses all fields from your plugin
-- Creates a numbered bug report (`Bug #123`)
-- Creates a thread with format: `Bug #123 – [Type] – [Map]`
+- Creates a thread with format: `Bug – [Type] – [Map]`
 - Preserves the screenshot in the embed
 - Adds reaction-based status tracking
 - Waits for log file attachment (30-second window)
 
 ### 2. Log File Association
 
-If your plugin sends a log file as a follow-up message:
+If you enabled logs in the project settings:
 
 - Bot detects it within 30 seconds
 - Automatically moves it to the correct bug thread
@@ -74,12 +73,12 @@ BugItGo: -200.00 0.00 92.00 352.65 174.85 0.00
 
 **Bot creates:**
 ```
-Bug #42 – Error / Bug Report – Untitled_1
+Bug – Error / Bug Report – Untitled_1
 ├─ Embed with all data
 ├─ Screenshot preserved
 ├─ Status: New
 ├─ Assigned to: Unassigned
-└─ Reactions: 👀 🧑‍💻 ✅ ❌ ⭐
+└─ Reactions: 🧑‍💻 ✅ ❌ ⭐
 ```
 
 **If log file follows within 30 seconds:**
@@ -126,9 +125,9 @@ Thread receives:
 
 To test the integration:
 
-1. **Send a test webhook** (use Discord webhook tester or your plugin)
+1. **Send a test bug report**
 2. **Check that:**
-   - Bot creates thread with bug number
+   - Bot creates thread
    - Fields are parsed correctly
    - Screenshot appears in embed
    - Reactions are added
@@ -141,7 +140,7 @@ To test the integration:
 
 ### Field Name Variations
 
-If your plugin uses different field names, update the parser in [bot.py](bot.py):
+If you set the plugin to use different field names (User ID), update the parser in [bot.py](bot.py):
 
 ```python
 def parse_plugin_embed(embed):
@@ -152,11 +151,11 @@ def parse_plugin_embed(embed):
 
 ### Thread Title Format
 
-Current format: `Bug #123 – [Type] – [Map]`
+Current format: `Bug – [Type] – [Map]`
 
 To change, edit in [bot.py](bot.py):
 ```python
-thread_title_parts = [f'Bug #{bug_number}']
+thread_title_parts = [f'Bug']
 # Customize what goes in the title
 ```
 
@@ -193,15 +192,7 @@ if (datetime.now() - timestamp).total_seconds() < 30:
 
 ## Plugin Code Integration
 
-If you'd like to share your Unreal Engine plugin code, I can further optimize the bot to match your exact embed format and add any custom fields you're using.
-
 **Share:**
 - Webhook embed creation code
 - Any custom fields
 - Log file attachment logic
-
-This will ensure 100% compatibility!
-
----
-
-**Note:** The bot automatically handles both webhook reports (from your plugin) and manual user reports in the same channel. Both get the same treatment with status tracking and threading.
