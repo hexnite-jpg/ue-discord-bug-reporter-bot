@@ -430,6 +430,38 @@ async def on_ready():
     print(f'Configured in {len(guild_channels)} guilds', flush=True)
 
 @bot.event
+async def on_guild_remove(guild):
+    """Clean up data when bot is removed from a guild"""
+    print(f'Bot removed from guild: {guild.name} (ID: {guild.id})', flush=True)
+    
+    # Remove guild configuration
+    if guild.id in guild_channels:
+        del guild_channels[guild.id]
+        save_guild_config()
+        print(f'Removed guild config for {guild.id}', flush=True)
+    
+    # Remove blocked users for this guild
+    if guild.id in blocked_users:
+        del blocked_users[guild.id]
+        save_blocked_users()
+        print(f'Removed blocked users for {guild.id}', flush=True)
+    
+    # Clean up in-memory data
+    keys_to_remove = [k for k in recently_blocked_webhooks.keys() if k[0] == guild.id]
+    for key in keys_to_remove:
+        del recently_blocked_webhooks[key]
+    
+    keys_to_remove = [k for k in pending_log_files.keys() if k[0] == guild.id]
+    for key in keys_to_remove:
+        del pending_log_files[key]
+    
+    keys_to_remove = [k for k in recent_bug_reports.keys() if k[0] == guild.id]
+    for key in keys_to_remove:
+        del recent_bug_reports[key]
+    
+    print(f'Cleanup complete for guild {guild.id}', flush=True)
+
+@bot.event
 async def on_message(message):
     """Handle incoming bug reports"""
     global bug_counter
