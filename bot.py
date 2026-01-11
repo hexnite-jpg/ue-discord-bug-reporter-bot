@@ -3,6 +3,8 @@ import os
 import json
 import re
 import asyncio
+import aiohttp
+import io
 from datetime import datetime, timedelta
 from collections import defaultdict
 from discord.ext import commands
@@ -630,14 +632,31 @@ async def process_webhook_bug_report(message):
     if plugin_data['location']:
         bug_embed.add_field(name='Location', value=plugin_data['location'], inline=False)
     
-    # Copy screenshot from original embed
-    if embed.image:
-        bug_embed.set_image(url=embed.image.url)
-    
     bug_embed.set_footer(text=f'Reported via {message.author.name}')
     
-    # Send the enhanced embed
-    bug_message = await message.channel.send(embed=bug_embed)
+    # Download and re-upload screenshot from embed image if available
+    screenshot_file = None
+    if embed.image:
+        try:
+            # Download the image from the embed URL
+            async with aiohttp.ClientSession() as session:
+                async with session.get(embed.image.url) as resp:
+                    if resp.status == 200:
+                        image_data = await resp.read()
+                        # Extract filename from URL or use default
+                        filename = embed.image.url.split('/')[-1].split('?')[0]
+                        if not filename or '.' not in filename:
+                            filename = 'screenshot.png'
+                        screenshot_file = discord.File(io.BytesIO(image_data), filename=filename)
+                        bug_embed.set_image(url=f"attachment://{filename}")
+        except Exception as e:
+            print(f'Error downloading screenshot from embed: {e}', flush=True)
+            screenshot_file = None
+    
+    if screenshot_file:
+        bug_message = await message.channel.send(embed=bug_embed, file=screenshot_file)
+    else:
+        bug_message = await message.channel.send(embed=bug_embed)
     
     # Create thread - use title but limit length
     thread = await bug_message.create_thread(
@@ -649,7 +668,7 @@ async def process_webhook_bug_report(message):
     report_key = (message.guild.id, message.id)
     recent_bug_reports[report_key] = (thread.id, datetime.now(), message.author.id)
     
-    # If the original webhook message has attachments (screenshot), send them to thread
+    # If the original webhook message has attachments (additional files), send them to thread
     if message.attachments:
         for attachment in message.attachments:
             try:
