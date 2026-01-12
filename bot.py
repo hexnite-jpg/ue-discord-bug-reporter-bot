@@ -162,13 +162,11 @@ def parse_plugin_embed(embed):
         'description': embed.description or 'No description provided'
     }
     
-    print(f'Parsing embed with {len(embed.fields)} fields:', flush=True)
+    print(f'Parsing embed with {len(embed.fields)} fields', flush=True)
     
     for field in embed.fields:
         field_name = field.name.strip()
         field_value = field.value.strip()
-        
-        print(f'  Field: "{field_name}" = "{field_value[:50]}"', flush=True)
         
         if 'Response Type' in field_name or field_name == 'Response Type':
             data['response_type'] = field_value
@@ -480,17 +478,13 @@ async def on_message(message):
     # Get the configured bug report channel for this guild
     bug_channel_id = get_bug_channel(message.guild.id)
     
-    # Debug logging
-    print(f'Message from {message.author.name} (bot={message.author.bot}) in channel {message.channel.id}', flush=True)
-    print(f'Configured channel: {bug_channel_id}, Has embeds: {len(message.embeds)}, Has attachments: {len(message.attachments)}', flush=True)
-    print(f'Message content: {message.content[:100] if message.content else "None"}', flush=True)
-    if message.embeds:
-        print(f'Embed fields: {[(f.name, f.value[:50]) for f in message.embeds[0].fields]}', flush=True)
-    
     # Only process messages in the bug report channel
     if not bug_channel_id or message.channel.id != bug_channel_id:
         await bot.process_commands(message)
         return
+    
+    # Log only when processing messages in the bug channel
+    print(f'Bug channel activity: {message.author.name} (bot={message.author.bot}), embeds={len(message.embeds)}, attachments={len(message.attachments)}', flush=True)
     
     # Only process webhook messages - ignore regular user messages
     if not message.author.bot:
