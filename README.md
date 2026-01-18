@@ -10,6 +10,7 @@ https://www.fab.com/listings/1b771480-3608-4bf7-b6f7-4ab74211d5a2
 - **Webhook Integration** - Automatically processes bug reports from Hexnite's plugin.
 - **Reaction-Based Workflow** - Status updates via emoji reactions (🧑‍💻 In Progress, ✅ Fixed, ❌ Won't Fix)
 - **Thread Organization** - Auto-creates threads for each bug with all details
+- **Forum Channel Support** - Works with both text channels and Discord forum channels
 - **Player Blocking** - Block spammers by Player ID
 - **Statistics** - Track bug status and completion rates
 - **Zero Database** - All state stored in Discord (reactions, threads, embeds)
@@ -32,6 +33,7 @@ See [INSTALL.md](docs/INSTALL.md) for detailed installation instructions.
 
 ## How It Works
 
+### Text Channel Mode
 1. Player reports bug in-game (via the plugin)
 2. Bot receives webhook and creates formatted embed
 3. Thread auto-created for discussion
@@ -39,9 +41,16 @@ See [INSTALL.md](docs/INSTALL.md) for detailed installation instructions.
 5. Embed auto-compacts when resolved
 6. Stats available via `/bug_stats`
 
+### Forum Channel Mode
+1. Player reports bug in-game (via the plugin)
+2. Bot receives webhook and creates a new forum post
+3. Each bug is a separate forum thread with the embed as the first message
+4. Staff uses reactions to update status
+5. Stats available via `/bug_stats`
+
 ## Commands
 
-- `/bug_setup` - Configure bug report channel (Admin)
+- `/bug_setup` - Configure bug report channel - text or forum (Admin)
 - `/bug_block_reporter` - Block a player ID (Admin)
 - `/bug_unblock` - Unblock a player ID (Admin)
 - `/bug_stats` - View bug statistics

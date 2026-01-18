@@ -159,6 +159,9 @@ def parse_plugin_embed(embed):
         'map': None,
         'user_id': None,
         'location': None,
+        'session_duration': None,
+        'system': None,
+        'video_settings': None,
         'description': embed.description or 'No description provided'
     }
     
@@ -177,6 +180,22 @@ def parse_plugin_embed(embed):
         elif 'BugIt' in field_name or 'Location' in field_name:
             data['location'] = field_value
             print(f'  -> Captured location!', flush=True)
+        elif 'Session Duration' in field_name or field_name == 'Session Duration':
+            data['session_duration'] = field_value
+        elif 'System' in field_name or field_name == 'System':
+            data['system'] = field_value
+        elif 'Video Settings' in field_name or field_name == 'Video Settings':
+            data['video_settings'] = field_value
+    
+    # If response_type wasn't found in fields, check the description
+    # Format: "Response Type: Error / Bug Report" at the end of description
+    if not data['response_type'] and data['description']:
+        response_match = re.search(r'Response Type:\s*(.+?)(?:\n|$)', data['description'])
+        if response_match:
+            data['response_type'] = response_match.group(1).strip()
+            # Remove the Response Type line from description since we extracted it
+            data['description'] = re.sub(r'\n*Response Type:\s*.+?(?:\n|$)', '', data['description']).strip()
+            print(f'  -> Extracted response_type from description: {data["response_type"]}', flush=True)
     
     print(f'Parsed data: {data}', flush=True)
     return data
@@ -191,7 +210,8 @@ def extract_player_id(embed):
 
 def get_current_status_from_reactions(message):
     """Determine current status from reactions, priority order"""
-    priority_order = ['✅', '❌', '🧑‍💻', '⭐']
+    # Only check actual status emojis - ⭐ is a priority modifier, not a status
+    priority_order = ['✅', '❌', '🧑‍💻']
     
     for emoji in priority_order:
         for reaction in message.reactions:
@@ -200,6 +220,13 @@ def get_current_status_from_reactions(message):
                 return emoji
     
     return None
+
+def is_high_priority(message):
+    """Check if message has high priority reaction"""
+    for reaction in message.reactions:
+        if str(reaction.emoji) == '⭐' and reaction.count > 1:
+            return True
+    return False
 
 async def get_assignee_from_reactions(message):
     """Get the first user who reacted with 🧑‍💻"""
@@ -233,12 +260,19 @@ async def update_embed_from_reactions(message):
     # Check if embed is already compacted (only has Status field)
     is_compacted = len(embed.fields) == 1 and embed.fields[0].name == 'Status'
     
-    # Get the thread from the message if it exists
+    # Check if this is a forum channel post
+    is_forum_post = isinstance(message.channel, discord.Thread) and isinstance(message.channel.parent, discord.ForumChannel)
+    
+    # Get the thread from the message
+    # For forum posts, the message's channel IS the thread
+    # For text channels, the thread is attached to the message
     thread = None
-    if hasattr(message, 'thread') and message.thread:
+    if is_forum_post:
+        thread = message.channel  # The channel itself is the forum thread
+    elif hasattr(message, 'thread') and message.thread:
         thread = message.thread
     
-    if is_resolved and thread and not is_compacted:
+    if is_resolved and thread and not is_compacted and not is_forum_post:
         # Only compact once - move detailed info to thread and compact the main embed
         # First check if details already exist in thread to avoid duplicates
         details_exist = False
@@ -288,8 +322,8 @@ async def update_embed_from_reactions(message):
         compact_embed.set_footer(text=embed.footer.text if embed.footer else '')
         
         await message.edit(embed=compact_embed)
-    elif is_compacted and not is_resolved and thread:
-        # Bug was reopened - restore full embed from thread details
+    elif is_compacted and not is_resolved and thread and not is_forum_post:
+        # Bug was reopened - restore full embed from thread details (not for forum posts)
         try:
             # Find the details message in the thread
             details_message = None
@@ -383,30 +417,108 @@ async def update_embed_from_reactions(message):
         
         await message.edit(embed=embed)
     
-    # Update thread title if status changed
-    if thread and status_emoji:
-        await update_thread_title(thread, status_text)
+    # Update forum tags based on status (for forum posts only)
+    is_forum_post = isinstance(message.channel, discord.Thread) and isinstance(message.channel.parent, discord.ForumChannel)
+    if is_forum_post:
+        await update_forum_tags(message.channel, status_text, is_high_priority(message), message)
 
-async def update_thread_title(thread, status):
-    """Update thread title"""
-    bug_num_match = re.search(r'Bug #(\d+)', thread.name)
-    bug_num = bug_num_match.group(0) if bug_num_match else 'Bug'
+async def update_forum_tags(thread, status, high_priority=False, message=None):
+    """Update forum post tags based on status and priority"""
+    forum_channel = thread.parent
+    if not isinstance(forum_channel, discord.ForumChannel):
+        return
     
-    # Extract original description (after the – )
-    desc_match = re.search(r'–\s*(.+)', thread.name)
-    description = desc_match.group(1) if desc_match else thread.name
+    # Map statuses to tag names
+    status_tag_map = {
+        'Fixed': 'Finished',
+        "Won't Fix": "Won't Fix",
+    }
     
-    # Remove old emoji if present
-    for old_emoji in THREAD_EMOJI.values():
-        description = description.replace(old_emoji, '').strip()
+    # Get the tag name for current status
+    status_tag_name = status_tag_map.get(status)
     
-    new_title = f"{bug_num} – {description}"
+    # Collect tags to apply
+    current_tags = list(thread.applied_tags)
+    new_tags = []
     
-    if thread.name != new_title:
+    # Status tags that should replace other tags when applied
+    status_tag_names = list(status_tag_map.values())
+    
+    # Helper to find or create a tag
+    async def get_or_create_tag(tag_name):
+        # Look for existing tag - need to refetch forum_channel to get current state
+        nonlocal forum_channel
+        for tag in forum_channel.available_tags:
+            if tag.name.lower() == tag_name.lower():
+                return tag
+        
+        # Try to create if doesn't exist
         try:
-            await thread.edit(name=new_title[:100])  # Discord limit
-        except:
-            pass
+            if len(forum_channel.available_tags) < 20:
+                existing_tags = list(forum_channel.available_tags)
+                new_tag = discord.ForumTag(name=tag_name[:20])
+                existing_tags.append(new_tag)
+                await forum_channel.edit(available_tags=existing_tags)
+                
+                # Refetch to get the tag with proper ID
+                forum_channel = await forum_channel.guild.fetch_channel(forum_channel.id)
+                for tag in forum_channel.available_tags:
+                    if tag.name.lower() == tag_name.lower():
+                        return tag
+        except Exception as e:
+            print(f'Error creating tag "{tag_name}": {e}', flush=True)
+        return None
+    
+    # Get response type from embed if available
+    response_type = None
+    if message and message.embeds:
+        for field in message.embeds[0].fields:
+            if field.name == 'Type':
+                response_type = field.value
+                break
+    
+    # If resolved (Finished or Won't Fix), only keep the status tag
+    # Otherwise, restore response type tag
+    if status_tag_name:
+        # Resolved - just use the status tag, remove response type
+        pass  # new_tags stays empty, we'll add just the status tag
+    else:
+        # Not resolved - restore response type tag if we have it
+        if response_type:
+            tag = await get_or_create_tag(response_type)
+            if tag:
+                new_tags.append(tag)
+        else:
+            # Fallback: keep existing non-status tags
+            for tag in current_tags:
+                if tag.name not in status_tag_names:
+                    new_tags.append(tag)
+    
+    # Add status tag if applicable (Finished or Won't Fix)
+    if status_tag_name:
+        tag = await get_or_create_tag(status_tag_name)
+        if tag:
+            new_tags.append(tag)
+    
+    # Add high priority tag if applicable (can coexist with other tags)
+    if high_priority:
+        # Remove High Priority from new_tags if it's already there (to avoid duplicates)
+        new_tags = [t for t in new_tags if t.name != 'High Priority']
+        tag = await get_or_create_tag('High Priority')
+        if tag:
+            new_tags.append(tag)
+    else:
+        # Remove High Priority tag if not high priority
+        new_tags = [t for t in new_tags if t.name != 'High Priority']
+    
+    # Update thread tags if changed (limit to 5 tags per Discord)
+    new_tags = new_tags[:5]
+    if set(t.id for t in new_tags) != set(t.id for t in current_tags):
+        try:
+            await thread.edit(applied_tags=new_tags)
+            print(f'Updated forum tags to: {[t.name for t in new_tags]}', flush=True)
+        except Exception as e:
+            print(f'Error updating forum tags: {e}', flush=True)
 
 # ========================
 # EVENT HANDLERS
@@ -461,6 +573,25 @@ async def on_guild_remove(guild):
     
     print(f'Cleanup complete for guild {guild.id}', flush=True)
 
+def is_in_bug_channel(message):
+    """Check if a message is in the configured bug channel (or a thread/post in a forum bug channel)"""
+    if not message.guild:
+        return False
+    
+    bug_channel_id = get_bug_channel(message.guild.id)
+    if not bug_channel_id:
+        return False
+    
+    # Direct match (text channel or forum channel)
+    if message.channel.id == bug_channel_id:
+        return True
+    
+    # Check if message is in a thread whose parent is the bug channel (for forum channels)
+    if isinstance(message.channel, discord.Thread) and message.channel.parent_id == bug_channel_id:
+        return True
+    
+    return False
+
 @bot.event
 async def on_message(message):
     """Handle incoming bug reports"""
@@ -478,8 +609,8 @@ async def on_message(message):
     # Get the configured bug report channel for this guild
     bug_channel_id = get_bug_channel(message.guild.id)
     
-    # Only process messages in the bug report channel
-    if not bug_channel_id or message.channel.id != bug_channel_id:
+    # Check if message is in the bug channel or a forum thread
+    if not is_in_bug_channel(message):
         await bot.process_commands(message)
         return
     
@@ -547,8 +678,8 @@ async def on_message_edit(before, after):
     if not after.guild:
         return
     
-    bug_channel_id = get_bug_channel(after.guild.id)
-    if not bug_channel_id or after.channel.id != bug_channel_id:
+    # Check if message is in the bug channel or a forum thread
+    if not is_in_bug_channel(after):
         return
     
     print(f'Message edited by {after.author.name}, now has {len(after.embeds)} embeds', flush=True)
@@ -622,9 +753,21 @@ async def process_webhook_bug_report(message):
     bug_embed.add_field(name='Assigned to', value='Unassigned', inline=True)
     bug_embed.add_field(name='Priority', value='Normal', inline=True)
     
+    # Add session duration if available
+    if plugin_data['session_duration']:
+        bug_embed.add_field(name='Session Duration', value=plugin_data['session_duration'], inline=True)
+    
     # Add location if available
     if plugin_data['location']:
         bug_embed.add_field(name='Location', value=plugin_data['location'], inline=False)
+    
+    # Add system info if available
+    if plugin_data['system']:
+        bug_embed.add_field(name='System', value=plugin_data['system'], inline=False)
+    
+    # Add video settings if available
+    if plugin_data['video_settings']:
+        bug_embed.add_field(name='Video Settings', value=plugin_data['video_settings'], inline=False)
     
     bug_embed.set_footer(text=f'Reported via {message.author.name}')
     
@@ -647,16 +790,99 @@ async def process_webhook_bug_report(message):
             print(f'Error downloading screenshot from embed: {e}', flush=True)
             screenshot_file = None
     
-    if screenshot_file:
-        bug_message = await message.channel.send(embed=bug_embed, file=screenshot_file)
-    else:
-        bug_message = await message.channel.send(embed=bug_embed)
+    # Check if we're posting to a forum channel or text channel
+    target_channel = message.channel
+    is_forum = isinstance(target_channel, discord.ForumChannel)
     
-    # Create thread - use title but limit length
-    thread = await bug_message.create_thread(
-        name=title[:100],  # Discord limit
-        auto_archive_duration=1440  # 24 hours
-    )
+    # If message came from a forum thread, get the parent forum channel
+    if isinstance(target_channel, discord.Thread) and target_channel.parent:
+        if isinstance(target_channel.parent, discord.ForumChannel):
+            is_forum = True
+            target_channel = target_channel.parent
+    
+    if is_forum:
+        # For forum channels, find or create a tag for the response type
+        applied_tags = []
+        if plugin_data['response_type']:
+            response_type = plugin_data['response_type']
+            print(f'Looking for tag: "{response_type}"', flush=True)
+            print(f'Available tags: {[t.name for t in target_channel.available_tags]}', flush=True)
+            
+            # Look for existing tag matching the response type
+            existing_tag = None
+            for tag in target_channel.available_tags:
+                if tag.name.lower() == response_type.lower():
+                    existing_tag = tag
+                    print(f'Found existing tag: {tag.name} (id={tag.id})', flush=True)
+                    break
+            
+            if existing_tag:
+                applied_tags.append(existing_tag)
+            else:
+                # Try to create a new tag for this response type
+                try:
+                    # Discord allows up to 20 tags per forum
+                    if len(target_channel.available_tags) < 20:
+                        # Need to include all existing tags plus the new one
+                        new_tags = list(target_channel.available_tags)
+                        new_tag = discord.ForumTag(name=response_type[:20])  # Tag names limited to 20 chars
+                        new_tags.append(new_tag)
+                        print(f'Creating new tag "{response_type[:20]}", total tags will be {len(new_tags)}', flush=True)
+                        
+                        # Check bot permissions
+                        bot_permissions = target_channel.permissions_for(message.guild.me)
+                        print(f'Bot has manage_channels: {bot_permissions.manage_channels}', flush=True)
+                        
+                        if not bot_permissions.manage_channels:
+                            print(f'Bot lacks manage_channels permission - cannot create tags', flush=True)
+                        else:
+                            await target_channel.edit(available_tags=new_tags)
+                            print(f'Tags updated successfully', flush=True)
+                            
+                            # Refetch channel to get the tag with proper ID
+                            target_channel = await target_channel.guild.fetch_channel(target_channel.id)
+                            for tag in target_channel.available_tags:
+                                if tag.name.lower() == response_type.lower():
+                                    applied_tags.append(tag)
+                                    print(f'New tag created and found: {tag.name} (id={tag.id})', flush=True)
+                                    break
+                    else:
+                        print(f'Cannot create tag "{response_type}" - forum has max 20 tags', flush=True)
+                except Exception as e:
+                    print(f'Error creating forum tag: {e}', flush=True)
+                    import traceback
+                    traceback.print_exc()
+        
+        # Create the forum post with tags
+        if screenshot_file:
+            thread_with_message = await target_channel.create_thread(
+                name=title[:100],  # Discord limit
+                embed=bug_embed,
+                file=screenshot_file,
+                applied_tags=applied_tags,
+                auto_archive_duration=1440  # 24 hours
+            )
+        else:
+            thread_with_message = await target_channel.create_thread(
+                name=title[:100],  # Discord limit
+                embed=bug_embed,
+                applied_tags=applied_tags,
+                auto_archive_duration=1440  # 24 hours
+            )
+        thread = thread_with_message.thread
+        bug_message = thread_with_message.message
+    else:
+        # For text channels, send message then create thread
+        if screenshot_file:
+            bug_message = await message.channel.send(embed=bug_embed, file=screenshot_file)
+        else:
+            bug_message = await message.channel.send(embed=bug_embed)
+        
+        # Create thread - use title but limit length
+        thread = await bug_message.create_thread(
+            name=title[:100],  # Discord limit
+            auto_archive_duration=1440  # 24 hours
+        )
     
     # Track this bug report for log file association
     report_key = (message.guild.id, message.id)
@@ -729,13 +955,20 @@ async def process_webhook_bug_report(message):
     for emoji in ['🧑‍💻', '✅', '❌', '⭐']:
         await bug_message.add_reaction(emoji)
     
-    # Try to delete original webhook message (may fail if already deleted)
+    # Try to delete original webhook message/thread
+    # For forum channels, the webhook creates a thread - we need to delete the entire thread
     try:
-        await message.delete()
-    except:
-        pass
+        if isinstance(message.channel, discord.Thread) and isinstance(message.channel.parent, discord.ForumChannel):
+            # This is a forum thread - delete the entire thread
+            await message.channel.delete()
+        else:
+            # Regular message - just delete it
+            await message.delete()
+    except Exception as e:
+        print(f'Could not delete original message/thread: {e}', flush=True)
     
-    print(f'Created bug report from webhook in guild {message.guild.id}', flush=True)
+    channel_type = 'forum' if is_forum else 'text channel'
+    print(f'Created bug report from webhook in guild {message.guild.id} ({channel_type})', flush=True)
 
 @bot.event
 async def on_raw_reaction_add(payload):
@@ -760,14 +993,6 @@ async def on_raw_reaction_add(payload):
     
     # Get the emoji
     emoji = str(payload.emoji)
-    
-    # Handle resolution (lock thread)
-    if emoji == '✅':
-        if isinstance(message.channel, discord.Thread):
-            try:
-                await message.channel.edit(locked=True, archived=False)
-            except:
-                pass
     
     # Update embed
     await update_embed_from_reactions(message)
@@ -802,10 +1027,10 @@ async def on_raw_reaction_remove(payload):
 
 @bot.tree.command(name='bug_setup', description='Configure bug report channel (Admin only)')
 @app_commands.describe(
-    channel='The channel where bug reports will be submitted'
+    channel='The text or forum channel where bug reports will be submitted'
 )
 @app_commands.default_permissions(administrator=True)
-async def bug_setup(interaction: discord.Interaction, channel: discord.TextChannel):
+async def bug_setup(interaction: discord.Interaction, channel: discord.abc.GuildChannel):
     """Configure the bug report channel for this server"""
     # Check if user has admin permissions
     if not interaction.user.guild_permissions.administrator:
@@ -815,16 +1040,36 @@ async def bug_setup(interaction: discord.Interaction, channel: discord.TextChann
         )
         return
     
+    # Validate channel type - only TextChannel or ForumChannel allowed
+    if not isinstance(channel, (discord.TextChannel, discord.ForumChannel)):
+        await interaction.response.send_message(
+            'Please select a text channel or forum channel.',
+            ephemeral=True
+        )
+        return
+    
     # Check if bot has necessary permissions in the channel
     bot_permissions = channel.permissions_for(interaction.guild.me)
-    required_perms = [
-        'view_channel',
-        'send_messages',
-        'manage_messages',
-        'add_reactions',
-        'create_public_threads',
-        'manage_threads'
-    ]
+    
+    # Different permissions needed for forum vs text channels
+    if isinstance(channel, discord.ForumChannel):
+        required_perms = [
+            'view_channel',
+            'send_messages_in_threads',
+            'manage_messages',
+            'add_reactions',
+            'create_public_threads',
+            'manage_threads'
+        ]
+    else:
+        required_perms = [
+            'view_channel',
+            'send_messages',
+            'manage_messages',
+            'add_reactions',
+            'create_public_threads',
+            'manage_threads'
+        ]
     
     missing_perms = [perm for perm in required_perms if not getattr(bot_permissions, perm)]
     
@@ -841,20 +1086,36 @@ async def bug_setup(interaction: discord.Interaction, channel: discord.TextChann
     set_bug_channel(interaction.guild.id, channel.id)
     
     # Send confirmation
+    is_forum = isinstance(channel, discord.ForumChannel)
+    channel_type = 'forum channel' if is_forum else 'text channel'
+    
     embed = discord.Embed(
         title='✅ Bug Tracker Configured!',
-        description=f'Bug reports will now be monitored in {channel.mention}',
+        description=f'Bug reports will now be monitored in {channel.mention} ({channel_type})',
         color=0x2ecc71
     )
-    embed.add_field(
-        name='How it works',
-        value=(
-            '1. Plugin posts bug reports in that channel\n'
-            '2. Bot creates a thread for each report\n'
-            '3. Use reactions or commands to manage bugs'
-        ),
-        inline=False
-    )
+    
+    if is_forum:
+        embed.add_field(
+            name='How it works (Forum Mode)',
+            value=(
+                '1. Plugin posts bug reports as new forum posts\n'
+                '2. Each bug report becomes a forum thread\n'
+                '3. Use reactions or commands to manage bugs'
+            ),
+            inline=False
+        )
+    else:
+        embed.add_field(
+            name='How it works',
+            value=(
+                '1. Plugin posts bug reports in that channel\n'
+                '2. Bot creates a thread for each report\n'
+                '3. Use reactions or commands to manage bugs'
+            ),
+            inline=False
+        )
+    
     embed.add_field(
         name='Reactions',
         value=(
@@ -870,16 +1131,17 @@ async def bug_setup(interaction: discord.Interaction, channel: discord.TextChann
     
     await interaction.response.send_message(embed=embed)
     
-    # Send a test message to the channel
-    test_embed = discord.Embed(
-        title='Bug Tracker Active',
-        description=(
-            'This channel is now configured for bug reports!\n\n'
-            '**Staff:** Use reactions or `/bug_` commands to manage.'
-        ),
-        color=0x3498db
-    )
-    await channel.send(embed=test_embed)
+    # Send a test message to the channel (skip for forum channels - can't send directly)
+    if not is_forum:
+        test_embed = discord.Embed(
+            title='Bug Tracker Active',
+            description=(
+                'This channel is now configured for bug reports!\n\n'
+                '**Staff:** Use reactions or `/bug_` commands to manage.'
+            ),
+            color=0x3498db
+        )
+        await channel.send(embed=test_embed)
 
 @bot.tree.command(name='bug_block_reporter', description='Block a user/player ID (admin only)')
 @app_commands.describe(user_id='The user/player ID to block')
@@ -976,30 +1238,69 @@ async def bug_stats(interaction: discord.Interaction):
         'high_priority': 0
     }
     
-    # Scan the channel for bug reports (no limit - scan all messages)
-    async for message in channel.history(limit=None):
-        # Only count bot messages with embeds (bug reports)
-        if message.author != bot.user or not message.embeds:
-            continue
+    # Check if this is a forum channel or text channel
+    is_forum = isinstance(channel, discord.ForumChannel)
+    
+    if is_forum:
+        # For forum channels, iterate through threads
+        # Get all threads (archived and active)
+        threads = channel.threads
         
-        stats['total'] += 1
+        # Also fetch archived threads
+        async for thread in channel.archived_threads(limit=None):
+            threads.append(thread)
         
-        # Check status from reactions
-        status_emoji = get_current_status_from_reactions(message)
-        
-        if status_emoji == '🧑‍💻':
-            stats['in_progress'] += 1
-        elif status_emoji == '✅':
-            stats['fixed'] += 1
-        elif status_emoji == '❌':
-            stats['wont_fix'] += 1
-        else:
-            stats['new'] += 1
-        
-        # Check for high priority
-        has_star = any(str(r.emoji) == '⭐' and r.count > 1 for r in message.reactions)
-        if has_star:
-            stats['high_priority'] += 1
+        for thread in threads:
+            # Get the starter message (first message in thread)
+            try:
+                starter_message = await thread.fetch_message(thread.id)
+                if starter_message.author == bot.user and starter_message.embeds:
+                    stats['total'] += 1
+                    
+                    # Check status from reactions
+                    status_emoji = get_current_status_from_reactions(starter_message)
+                    
+                    if status_emoji == '🧑‍💻':
+                        stats['in_progress'] += 1
+                    elif status_emoji == '✅':
+                        stats['fixed'] += 1
+                    elif status_emoji == '❌':
+                        stats['wont_fix'] += 1
+                    else:
+                        stats['new'] += 1
+                    
+                    # Check for high priority
+                    has_star = any(str(r.emoji) == '⭐' and r.count > 1 for r in starter_message.reactions)
+                    if has_star:
+                        stats['high_priority'] += 1
+            except Exception as e:
+                print(f'Error fetching thread starter: {e}', flush=True)
+                continue
+    else:
+        # For text channels, scan channel history
+        async for message in channel.history(limit=None):
+            # Only count bot messages with embeds (bug reports)
+            if message.author != bot.user or not message.embeds:
+                continue
+            
+            stats['total'] += 1
+            
+            # Check status from reactions
+            status_emoji = get_current_status_from_reactions(message)
+            
+            if status_emoji == '🧑‍💻':
+                stats['in_progress'] += 1
+            elif status_emoji == '✅':
+                stats['fixed'] += 1
+            elif status_emoji == '❌':
+                stats['wont_fix'] += 1
+            else:
+                stats['new'] += 1
+            
+            # Check for high priority
+            has_star = any(str(r.emoji) == '⭐' and r.count > 1 for r in message.reactions)
+            if has_star:
+                stats['high_priority'] += 1
     
     # Build embed
     embed = discord.Embed(
@@ -1082,10 +1383,13 @@ async def bug_my_bugs(interaction: discord.Interaction):
     # Find all bugs assigned to this user
     assigned_bugs = []
     
-    async for message in channel.history(limit=None):
-        # Only check bot messages with embeds (bug reports)
+    # Check if this is a forum channel or text channel
+    is_forum = isinstance(channel, discord.ForumChannel)
+    
+    async def check_message_for_assignment(message, thread_url):
+        """Helper to check if user is assigned to a bug message"""
         if message.author != bot.user or not message.embeds:
-            continue
+            return None
         
         # Check if user reacted with 🧑‍💻
         for reaction in message.reactions:
@@ -1096,16 +1400,39 @@ async def bug_my_bugs(interaction: discord.Interaction):
                     status_emoji = get_current_status_from_reactions(message)
                     status_text = REACTIONS.get(status_emoji, {}).get('status', 'New') if status_emoji else 'New'
                     
-                    # Get thread link
-                    thread_url = f"https://discord.com/channels/{interaction.guild.id}/{message.id}"
-                    
-                    assigned_bugs.append({
+                    return {
                         'title': message.embeds[0].title,
                         'status': status_text,
                         'url': thread_url,
                         'high_priority': any(str(r.emoji) == '⭐' and r.count > 1 for r in message.reactions)
-                    })
-                break
+                    }
+        return None
+    
+    if is_forum:
+        # For forum channels, iterate through threads
+        threads = list(channel.threads)
+        
+        # Also fetch archived threads
+        async for thread in channel.archived_threads(limit=None):
+            threads.append(thread)
+        
+        for thread in threads:
+            try:
+                starter_message = await thread.fetch_message(thread.id)
+                thread_url = f"https://discord.com/channels/{interaction.guild.id}/{thread.id}"
+                result = await check_message_for_assignment(starter_message, thread_url)
+                if result:
+                    assigned_bugs.append(result)
+            except Exception as e:
+                print(f'Error fetching thread starter: {e}', flush=True)
+                continue
+    else:
+        # For text channels, scan channel history
+        async for message in channel.history(limit=None):
+            thread_url = f"https://discord.com/channels/{interaction.guild.id}/{message.id}"
+            result = await check_message_for_assignment(message, thread_url)
+            if result:
+                assigned_bugs.append(result)
     
     # Build response embed
     if not assigned_bugs:
