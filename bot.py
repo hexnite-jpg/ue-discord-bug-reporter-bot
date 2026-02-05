@@ -13,12 +13,18 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Check if this is a self-hosted instance (enables Trello integration)
+SELF_HOSTED = os.getenv('SELF_HOSTED', 'false').lower() == 'true'
+
 # ========================
 # CONFIGURATION
 # ========================
 
 # Guild configuration file (stores channel IDs per server)
 GUILD_CONFIG_FILE = 'guild_config.json'
+
+# Trello configuration file (stores Trello API credentials per server - self-hosted only)
+TRELLO_CONFIG_FILE = 'trello_config.json'
 
 # Blocked users file (minimal storage for bans)
 BLOCKED_USERS_FILE = 'blocked_ids.json'
@@ -53,6 +59,7 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 # In-memory storage (resets on restart)
 blocked_users = {}  # Maps guild_id -> set of blocked user IDs
 guild_channels = {}  # Maps guild_id -> bug_report_channel_id
+trello_config = {}  # Maps guild_id -> {api_key, token, list_id, trello_only} (self-hosted only)
 recent_bug_reports = {}  # Maps (guild_id, message_id) -> (thread_id, timestamp) for log file association
 pending_log_files = {}  # Maps (guild_id, message_id) -> list of (message, timestamp) for delayed log files
 recently_blocked_webhooks = {}  # Maps (guild_id, webhook_id) -> timestamp for blocking follow-up messages
@@ -151,6 +158,131 @@ def unblock_user(guild_id, user_id):
         for key in keys_to_remove:
             del recently_blocked_webhooks[key]
         print(f'Cleared {len(keys_to_remove)} webhook caches for guild {guild_id}', flush=True)
+
+# ========================
+# TRELLO FUNCTIONS (Self-hosted only)
+# ========================
+
+def load_trello_config():
+    """Load Trello configurations from file (self-hosted only)"""
+    global trello_config
+    if not SELF_HOSTED:
+        return
+    try:
+        if os.path.exists(TRELLO_CONFIG_FILE):
+            with open(TRELLO_CONFIG_FILE, 'r') as f:
+                data = json.load(f)
+                trello_config = {int(k): v for k, v in data.items()}
+            print(f'Loaded Trello config for {len(trello_config)} guilds', flush=True)
+    except Exception as e:
+        print(f'Error loading Trello config: {e}', flush=True)
+        trello_config = {}
+
+def save_trello_config():
+    """Save Trello configurations to file (self-hosted only)"""
+    if not SELF_HOSTED:
+        return
+    try:
+        with open(TRELLO_CONFIG_FILE, 'w') as f:
+            data = {str(k): v for k, v in trello_config.items()}
+            json.dump(data, f, indent=2)
+    except Exception as e:
+        print(f'Error saving Trello config: {e}', flush=True)
+
+def get_trello_config(guild_id):
+    """Get Trello config for a guild"""
+    return trello_config.get(guild_id)
+
+def set_trello_config(guild_id, api_key, token, list_id, trello_only=False):
+    """Set Trello config for a guild"""
+    trello_config[guild_id] = {
+        'api_key': api_key,
+        'token': token,
+        'list_id': list_id,
+        'trello_only': trello_only
+    }
+    save_trello_config()
+
+def remove_trello_config(guild_id):
+    """Remove Trello config for a guild"""
+    if guild_id in trello_config:
+        del trello_config[guild_id]
+        save_trello_config()
+
+def is_trello_only(guild_id):
+    """Check if guild is in trello-only mode"""
+    config = get_trello_config(guild_id)
+    return config and config.get('trello_only', False)
+
+async def create_trello_card(guild_id, name, description, source_url=None, attachments=None):
+    """Create a Trello card for a bug report with optional attachments
+    
+    Args:
+        guild_id: Discord guild ID
+        name: Card title
+        description: Card description
+        source_url: Link back to Discord
+        attachments: List of dicts with 'url' and 'name' keys
+    """
+    config = get_trello_config(guild_id)
+    if not config:
+        return None, "Trello not configured for this server"
+    
+    api_key = config['api_key']
+    token = config['token']
+    list_id = config['list_id']
+    
+    # Build card description with source link
+    full_desc = description
+    if source_url:
+        full_desc += f"\n\n---\n[View in Discord]({source_url})"
+    
+    # Trello API endpoint
+    url = "https://api.trello.com/1/cards"
+    params = {
+        'key': api_key,
+        'token': token,
+        'idList': list_id,
+        'name': name[:500],  # Trello name limit
+        'desc': full_desc[:16384],  # Trello description limit
+        'pos': 'top'
+    }
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            # Create the card
+            async with session.post(url, params=params) as resp:
+                if resp.status == 200:
+                    card_data = await resp.json()
+                    card_id = card_data.get('id')
+                else:
+                    error_text = await resp.text()
+                    print(f'Trello API error {resp.status}: {error_text}', flush=True)
+                    return None, f"Trello API error: {resp.status}"
+            
+            # Attach files to the card
+            if attachments and card_id:
+                attach_url = f"https://api.trello.com/1/cards/{card_id}/attachments"
+                for attach in attachments:
+                    attach_params = {
+                        'key': api_key,
+                        'token': token,
+                        'url': attach['url'],
+                        'name': attach.get('name', 'attachment')
+                    }
+                    try:
+                        async with session.post(attach_url, params=attach_params) as attach_resp:
+                            if attach_resp.status == 200:
+                                print(f'Attached {attach["name"]} to Trello card', flush=True)
+                            else:
+                                print(f'Failed to attach {attach["name"]}: {attach_resp.status}', flush=True)
+                    except Exception as e:
+                        print(f'Error attaching file: {e}', flush=True)
+            
+            return card_data, None
+    except Exception as e:
+        print(f'Error creating Trello card: {e}', flush=True)
+        return None, str(e)
 
 def parse_plugin_embed(embed):
     """Parse embed from Unreal Engine plugin webhook"""
@@ -529,6 +661,7 @@ async def on_ready():
     print(f'Logged in as {bot.user} (ID: {bot.user.id})', flush=True)
     load_guild_config()
     load_blocked_users()
+    load_trello_config()
     
     # Sync slash commands
     try:
@@ -539,6 +672,8 @@ async def on_ready():
     
     print('------', flush=True)
     print('Bug tracker bot is ready!', flush=True)
+    if SELF_HOSTED:
+        print('Running in SELF-HOSTED mode (Trello integration available)', flush=True)
     print(f'Configured in {len(guild_channels)} guilds', flush=True)
 
 @bot.event
@@ -557,6 +692,12 @@ async def on_guild_remove(guild):
         del blocked_users[guild.id]
         save_blocked_users()
         print(f'Removed blocked users for {guild.id}', flush=True)
+    
+    # Remove Trello config for this guild (self-hosted only)
+    if SELF_HOSTED and guild.id in trello_config:
+        del trello_config[guild.id]
+        save_trello_config()
+        print(f'Removed Trello config for {guild.id}', flush=True)
     
     # Clean up in-memory data
     keys_to_remove = [k for k in recently_blocked_webhooks.keys() if k[0] == guild.id]
@@ -952,8 +1093,15 @@ async def process_webhook_bug_report(message):
             del pending_log_files[webhook_key]
     
     # Add default reactions to our new message
-    for emoji in ['🧑‍💻', '✅', '❌', '⭐']:
-        await bug_message.add_reaction(emoji)
+    # In trello_only mode, only add the clipboard emoji for Trello
+    if is_trello_only(message.guild.id):
+        await bug_message.add_reaction('📋')
+    else:
+        for emoji in ['🧑‍💻', '✅', '❌', '⭐']:
+            await bug_message.add_reaction(emoji)
+        # Also add Trello reaction if configured (but not trello_only)
+        if SELF_HOSTED and get_trello_config(message.guild.id):
+            await bug_message.add_reaction('📋')
     
     # Try to delete original webhook message/thread
     # For forum channels, the webhook creates a thread - we need to delete the entire thread
@@ -994,6 +1142,83 @@ async def on_raw_reaction_add(payload):
     # Get the emoji
     emoji = str(payload.emoji)
     
+    # Handle Trello clipboard reaction (self-hosted only)
+    if SELF_HOSTED and emoji == '📋' and message.guild:
+        trello_cfg = get_trello_config(message.guild.id)
+        if trello_cfg:
+            # Build card content from embed
+            embed = message.embeds[0]
+            card_name = embed.title or 'Bug Report'
+            
+            # Build description from embed fields
+            desc_parts = []
+            if embed.description:
+                desc_parts.append(embed.description)
+            
+            for field in embed.fields:
+                if field.name not in ['Status', 'Assigned to', 'Priority']:
+                    desc_parts.append(f"**{field.name}:** {field.value}")
+            
+            card_desc = '\n\n'.join(desc_parts)
+            
+            # Get message URL
+            source_url = f"https://discord.com/channels/{message.guild.id}/{message.channel.id}/{message.id}"
+            
+            # Collect attachments (screenshot from embed, files from thread)
+            attachments = []
+            
+            # Add embed image (screenshot)
+            if embed.image and embed.image.url:
+                attachments.append({
+                    'url': embed.image.url,
+                    'name': 'screenshot.png'
+                })
+            
+            # Get thread to find log files and other attachments
+            thread = None
+            if isinstance(message.channel, discord.Thread):
+                # Message is in a forum thread - channel IS the thread
+                thread = message.channel
+            elif hasattr(message, 'thread') and message.thread:
+                # Message has an attached thread (text channel)
+                thread = message.thread
+            
+            # Scan thread for attachments (log files, etc.)
+            if thread:
+                try:
+                    async for thread_msg in thread.history(limit=50):
+                        for attachment in thread_msg.attachments:
+                            # Add each attachment URL
+                            attachments.append({
+                                'url': attachment.url,
+                                'name': attachment.filename
+                            })
+                except Exception as e:
+                    print(f'Error scanning thread for attachments: {e}', flush=True)
+            
+            # Create the Trello card with attachments
+            card, error = await create_trello_card(
+                message.guild.id, 
+                card_name, 
+                card_desc, 
+                source_url,
+                attachments=attachments
+            )
+            
+            if card:
+                attach_count = len(attachments)
+                print(f'Created Trello card with {attach_count} attachments: {card.get("shortUrl")}', flush=True)
+            else:
+                print(f'Failed to create Trello card: {error}', flush=True)
+            
+            # If trello_only mode, don't process other reactions
+            if is_trello_only(message.guild.id):
+                return
+    
+    # Skip embed updates in trello_only mode
+    if message.guild and is_trello_only(message.guild.id):
+        return
+    
     # Update embed
     await update_embed_from_reactions(message)
 
@@ -1016,6 +1241,10 @@ async def on_raw_reaction_remove(payload):
     
     # Only process reactions on bot messages with embeds
     if not message.embeds or message.author != bot.user:
+        return
+    
+    # Skip embed updates in trello_only mode
+    if message.guild and is_trello_only(message.guild.id):
         return
     
     # Update embed
@@ -1461,6 +1690,264 @@ async def bug_my_bugs(interaction: discord.Interaction):
     embed.set_footer(text=f'Scanned all messages in #{channel.name}')
     
     await interaction.followup.send(embed=embed, ephemeral=True)
+
+# ========================
+# TRELLO COMMANDS (Self-hosted only)
+# ========================
+
+if SELF_HOSTED:
+    @bot.tree.command(name='trello_setup', description='Configure Trello integration (Admin only)')
+    @app_commands.describe(
+        api_key='Your Trello API key (from trello.com/app-key)',
+        token='Your Trello API token',
+        list_id='The ID of the Trello list to add cards to',
+        trello_only='If true, disables normal bot reactions and only uses Trello',
+        channel='The channel to monitor for bug reports (optional if already set via /bug_setup)'
+    )
+    @app_commands.default_permissions(administrator=True)
+    async def trello_setup(
+        interaction: discord.Interaction,
+        api_key: str,
+        token: str,
+        list_id: str,
+        trello_only: bool = False,
+        channel: discord.abc.GuildChannel = None
+    ):
+        """Configure Trello integration for this server"""
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message(
+                'You need administrator permissions to configure Trello.',
+                ephemeral=True
+            )
+            return
+        
+        if not interaction.guild:
+            await interaction.response.send_message(
+                'This command must be used in a server.',
+                ephemeral=True
+            )
+            return
+        
+        # Check if bug channel is configured or provided
+        existing_channel = get_bug_channel(interaction.guild.id)
+        if not channel and not existing_channel:
+            await interaction.response.send_message(
+                '❌ No bug report channel configured.\n'
+                'Please provide the `channel` parameter or run `/bug_setup` first.',
+                ephemeral=True
+            )
+            return
+        
+        # If channel provided, validate and set it
+        if channel:
+            if not isinstance(channel, (discord.TextChannel, discord.ForumChannel)):
+                await interaction.response.send_message(
+                    '❌ Please select a text channel or forum channel.',
+                    ephemeral=True
+                )
+                return
+            
+            # Check bot permissions in the channel
+            bot_permissions = channel.permissions_for(interaction.guild.me)
+            if isinstance(channel, discord.ForumChannel):
+                required_perms = ['view_channel', 'send_messages_in_threads', 'manage_messages', 'add_reactions', 'create_public_threads', 'manage_threads']
+            else:
+                required_perms = ['view_channel', 'send_messages', 'manage_messages', 'add_reactions', 'create_public_threads', 'manage_threads']
+            
+            missing_perms = [perm for perm in required_perms if not getattr(bot_permissions, perm)]
+            if missing_perms:
+                await interaction.response.send_message(
+                    f'❌ Missing permissions in {channel.mention}:\n' +
+                    '\n'.join(f'• {perm.replace("_", " ").title()}' for perm in missing_perms),
+                    ephemeral=True
+                )
+                return
+        
+        # Test the Trello credentials by trying to get the list
+        test_url = f"https://api.trello.com/1/lists/{list_id}"
+        params = {'key': api_key, 'token': token}
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(test_url, params=params) as resp:
+                    if resp.status == 200:
+                        list_data = await resp.json()
+                        list_name = list_data.get('name', 'Unknown')
+                    elif resp.status == 401:
+                        await interaction.response.send_message(
+                            '❌ Invalid API key or token. Please check your credentials.',
+                            ephemeral=True
+                        )
+                        return
+                    elif resp.status == 404:
+                        await interaction.response.send_message(
+                            '❌ List not found. Please check the list ID.',
+                            ephemeral=True
+                        )
+                        return
+                    else:
+                        await interaction.response.send_message(
+                            f'❌ Trello API error: {resp.status}',
+                            ephemeral=True
+                        )
+                        return
+        except Exception as e:
+            await interaction.response.send_message(
+                f'❌ Error connecting to Trello: {e}',
+                ephemeral=True
+            )
+            return
+        
+        # Save the bug channel if provided
+        if channel:
+            set_bug_channel(interaction.guild.id, channel.id)
+        
+        # Save the Trello configuration
+        set_trello_config(interaction.guild.id, api_key, token, list_id, trello_only)
+        
+        # Build confirmation embed
+        embed = discord.Embed(
+            title='✅ Trello Integration Configured!',
+            color=0x0079bf  # Trello blue
+        )
+        embed.add_field(name='Trello List', value=list_name, inline=True)
+        embed.add_field(name='Trello-Only Mode', value='Enabled' if trello_only else 'Disabled', inline=True)
+        
+        # Show which channel is being monitored
+        monitored_channel_id = channel.id if channel else existing_channel
+        embed.add_field(name='Bug Channel', value=f'<#{monitored_channel_id}>', inline=True)
+        
+        if trello_only:
+            embed.add_field(
+                name='How it works',
+                value=(
+                    '• Bug reports will only show the 📋 reaction\n'
+                    '• React with 📋 to send a bug to Trello\n'
+                    '• Normal status reactions are disabled'
+                ),
+                inline=False
+            )
+        else:
+            embed.add_field(
+                name='How it works',
+                value=(
+                    '• Bug reports show normal reactions + 📋\n'
+                    '• React with 📋 to send a bug to Trello\n'
+                    '• Status reactions work as usual'
+                ),
+                inline=False
+            )
+        
+        embed.set_footer(text='Your credentials are stored securely on this server.')
+        
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        print(f'Trello configured for guild {interaction.guild.id} (trello_only={trello_only})', flush=True)
+    
+    @bot.tree.command(name='trello_remove', description='Remove Trello integration (Admin only)')
+    @app_commands.default_permissions(administrator=True)
+    async def trello_remove(interaction: discord.Interaction):
+        """Remove Trello integration for this server"""
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message(
+                'You need administrator permissions to remove Trello integration.',
+                ephemeral=True
+            )
+            return
+        
+        if not interaction.guild:
+            await interaction.response.send_message(
+                'This command must be used in a server.',
+                ephemeral=True
+            )
+            return
+        
+        if not get_trello_config(interaction.guild.id):
+            await interaction.response.send_message(
+                'Trello is not configured for this server.',
+                ephemeral=True
+            )
+            return
+        
+        remove_trello_config(interaction.guild.id)
+        
+        await interaction.response.send_message(
+            '✅ Trello integration has been removed. Your credentials have been deleted.',
+            ephemeral=True
+        )
+        print(f'Trello config removed for guild {interaction.guild.id}', flush=True)
+    
+    @bot.tree.command(name='trello_help', description='How to set up Trello integration')
+    async def trello_help(interaction: discord.Interaction):
+        """Show help for setting up Trello integration"""
+        embed = discord.Embed(
+            title='📋 Trello Integration Setup Guide',
+            description='Follow these steps to connect your Trello board to the bug tracker.',
+            color=0x0079bf
+        )
+        
+        embed.add_field(
+            name='Step 1: Create a Power-Up',
+            value=(
+                '1. Go to [trello.com/power-ups/admin](https://trello.com/power-ups/admin)\n'
+                '2. Click **New** to create a new Power-Up\n'
+                '3. Fill in a name (e.g., "Bug Tracker") and select a Workspace\n'
+                '4. Click **Create**'
+            ),
+            inline=False
+        )
+        
+        embed.add_field(
+            name='Step 2: Get Your API Key',
+            value=(
+                '1. In your new Power-Up, go to the **API Key** tab\n'
+                '2. Click **Generate a new API Key**\n'
+                '3. Copy the **API Key**'
+            ),
+            inline=False
+        )
+        
+        embed.add_field(
+            name='Step 3: Generate a Token',
+            value=(
+                '1. On the same page, click the **Token** link (right side)\n'
+                '2. Click **Allow** to authorize access\n'
+                '3. Copy the **Token** shown'
+            ),
+            inline=False
+        )
+        
+        embed.add_field(
+            name='Step 4: Get Your List ID',
+            value=(
+                '1. Open your Trello board in a browser\n'
+                '2. Add `.json` to the end of the URL\n'
+                '   Example: `trello.com/b/abc123/board.json`\n'
+                '3. Press Ctrl+F and search for your list name\n'
+                '4. Copy the `"id"` value next to it'
+            ),
+            inline=False
+        )
+        
+        embed.add_field(
+            name='Step 5: Run the Setup Command',
+            value=(
+                '```\n'
+                '/trello_setup api_key:<key> token:<token> list_id:<id>\n'
+                '```\n'
+                'Optional: Add `trello_only:true` to disable normal reactions'
+            ),
+            inline=False
+        )
+        
+        embed.add_field(
+            name='Usage',
+            value='Once configured, react with 📋 on any bug report to send it to Trello as a card.',
+            inline=False
+        )
+        
+        embed.set_footer(text='Your credentials are stored on the server running this bot.')
+        
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
 # ========================
 # RUN BOT

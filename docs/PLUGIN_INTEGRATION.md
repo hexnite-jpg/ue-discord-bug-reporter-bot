@@ -196,3 +196,79 @@ if (datetime.now() - timestamp).total_seconds() < 30:
 - Webhook embed creation code
 - Any custom fields
 - Log file attachment logic
+
+## Trello Integration (Self-Hosted Only)
+
+If you're running a self-hosted instance of this bot, you can enable Trello integration to send bug reports to a Trello board.
+
+### Enabling Trello Support
+
+Add to your `.env` file:
+```
+SELF_HOSTED=true
+```
+
+This unlocks the following commands:
+- `/trello_setup` - Configure Trello credentials
+- `/trello_remove` - Remove Trello configuration
+- `/trello_status` - Check if Trello is configured
+- `/trello_help` - Step-by-step setup guide
+
+### Setup Steps
+
+#### 1. Create a Power-Up
+1. Go to https://trello.com/power-ups/admin
+2. Click **New** to create a new Power-Up
+3. Fill in a name (e.g., "Bug Tracker") and select a Workspace
+4. Click **Create**
+
+#### 2. Get Your API Key
+1. In your new Power-Up, go to the **API Key** tab
+2. Click **Generate a new API Key**
+3. Copy the **API Key**
+
+#### 3. Generate a Token
+1. On the same page, click the **Token** link (on the right side of the API key)
+2. Click **Allow** to authorize access to your Trello account
+3. Copy the **Token** shown
+
+#### 3. Get Your List ID
+1. Open your Trello board in a browser
+2. Add `.json` to the end of the URL
+   - Example: `https://trello.com/b/abc123/my-board.json`
+3. Press Ctrl+F and search for your list name (e.g., "Bugs")
+4. Copy the `"id"` value next to it (looks like `"id":"60a1b2c3d4e5f6g7"`)
+
+#### 4. Run the Setup Command
+```
+/trello_setup api_key:<your-key> token:<your-token> list_id:<your-list-id>
+```
+
+### Trello-Only Mode
+
+Add `trello_only:true` to the setup command to disable normal bot features:
+
+```
+/trello_setup api_key:<key> token:<token> list_id:<id> trello_only:true
+```
+
+**In Trello-Only mode:**
+- Bug reports only show the 📋 reaction
+- Status reactions (🧑‍💻, ✅, ❌, ⭐) are disabled
+- No embed updates when reactions change
+- Only the Trello integration is active
+
+### Usage
+
+Once configured, react with 📋 on any bug report to send it to Trello as a card.
+
+The card will include:
+- Bug title
+- Description and all parsed fields
+- Link back to the Discord thread
+
+### Security Notes
+
+- Credentials are stored in `trello_config.json` on the server
+- Only available for self-hosted instances
+- Credentials are automatically deleted when the bot is removed from a server
