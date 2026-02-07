@@ -13,6 +13,8 @@ When a player submits a bug report via the Discord Bug Reporter plugin:
   - Response Type (e.g., "Error / Bug Report")
   - Map name
   - Optional: User ID (Player GUID)
+  - Optional: System Specs
+  - Optional: Video Settings
   - Location (BugItGo coordinates)
   - Screenshot (attached to embed)
 - Optional: Log file as a second message
@@ -24,6 +26,8 @@ When a player submits a bug report via the Discord Bug Reporter plugin:
 - Preserves the screenshot in the embed
 - Adds reaction-based status tracking
 - Waits for log file attachment (30-second window)
+
+In a forum style channel, all of this will be included in the post and the bot won't need to move things around.
 
 ### 2. Log File Association
 
@@ -109,17 +113,6 @@ Thread receives:
 - Clean channel (originals deleted)
 - All files in correct thread
 - Easy to track and manage
-
-## Compatibility
-
-**Works with:**
-- Webhook messages from Unreal Engine
-- Multiple Discord servers simultaneously
-
-**Per-server isolation:**
-- Each game server has independent bug tracking
-- Separate block lists
-- No cross-contamination
 
 ## Testing
 
@@ -211,7 +204,6 @@ SELF_HOSTED=true
 This unlocks the following commands:
 - `/trello_setup` - Configure Trello credentials
 - `/trello_remove` - Remove Trello configuration
-- `/trello_status` - Check if Trello is configured
 - `/trello_help` - Step-by-step setup guide
 
 ### Setup Steps
@@ -219,7 +211,7 @@ This unlocks the following commands:
 #### 1. Create a Power-Up
 1. Go to https://trello.com/power-ups/admin
 2. Click **New** to create a new Power-Up
-3. Fill in a name (e.g., "Bug Tracker") and select a Workspace
+3. Fill in a name (e.g., "Bug Reporter") and select a Workspace
 4. Click **Create**
 
 #### 2. Get Your API Key
@@ -241,7 +233,7 @@ This unlocks the following commands:
 
 #### 4. Run the Setup Command
 ```
-/trello_setup api_key:<your-key> token:<your-token> list_id:<your-list-id>
+/trello_setup api_key:<your-key> token:<your-token> list_id:<your-list-id> channel:<your-bug-report-channel>
 ```
 
 ### Trello-Only Mode
@@ -249,7 +241,7 @@ This unlocks the following commands:
 Add `trello_only:true` to the setup command to disable normal bot features:
 
 ```
-/trello_setup api_key:<key> token:<token> list_id:<id> trello_only:true
+/trello_setup api_key:<key> token:<token> list_id:<id> trello_only:true channel:<channel>
 ```
 
 **In Trello-Only mode:**
