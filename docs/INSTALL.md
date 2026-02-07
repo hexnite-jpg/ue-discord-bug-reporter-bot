@@ -132,7 +132,7 @@ sudo systemctl start discordbot.service
 
 ## Post-Installation
 
-1. **Test the bot:** Send a message in your configured channel
+1. **Test the bot:** Send in a report to your configured channel
 2. **Configure reactions:** React to bug reports to change status
 3. **View statistics:** Run `/bug_stats` to see bug metrics
 4. **Check your bugs:** Run `/bug_my_bugs` to see your assignments
