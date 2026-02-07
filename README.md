@@ -8,21 +8,12 @@ https://www.fab.com/listings/1b771480-3608-4bf7-b6f7-4ab74211d5a2
 ## Features
 
 - **Webhook Integration** - Automatically processes bug reports from Hexnite's plugin.
-- **Reaction-Based Workflow** - Status updates via emoji reactions (🧑‍💻 In Progress, ✅ Fixed, ❌ Won't Fix)
+- **Reaction-Based Workflow** - Status updates via emoji reactions (🧑‍💻 In Progress, ✅ Fixed, ❌ Won't Fix, ⭐ High Priority)
 - **Thread Organization** - Auto-creates threads for each bug with all details
 - **Forum Channel Support** - Works with both text channels and Discord forum channels
 - **Player Blocking** - Block spammers by Player ID
 - **Statistics** - Track bug status and completion rates
 - **Zero Database** - All state stored in Discord (reactions, threads, embeds)
-
-## Quick Start
-
-```bash
-git clone https://github.com/hexnite-jpg/ue-discord-bug-reporter-bot.git
-cd ue-discord-bug-reporter-bot
-chmod +x install.sh
-./install.sh
-```
 
 See [INSTALL.md](docs/INSTALL.md) for detailed installation instructions.
 
@@ -56,6 +47,11 @@ See [INSTALL.md](docs/INSTALL.md) for detailed installation instructions.
 - `/bug_stats` - View bug statistics
 - `/bug_my_bugs` - List bugs assigned to you (ephemeral)
 
+New Trello Commands - Requires you to change the SELF_HOSTED flag in the .env file to true
+- `/trello_setup` - Takes in 4 arguments: api_key, token, list_id, trello_only, channel (Admin)
+- `/trello_remove` - Removes the Trello integration. (Admin)
+- `/trello_help` - Shows step-by-step guide on how to set up the Trello integration.
+  
 ## Requirements
 
 - Python 3.8+
